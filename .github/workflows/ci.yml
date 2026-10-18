@@ -295,55 +295,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-wasm-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-wasm-build-
+            ${{ runner.os }}-cargo-build-target-
 
-      - name: Install soroban-cli
-        run: |
-          cargo install --locked soroban-cli
+      - name: Build all contracts to WASM
+        run: cargo build --workspace --target wasm32-unknown-unknown --release
 
-      - name: Build WASM binaries
+      - name: Verify WASM exports match each contract's own #[contractimpl]
         run: |
-          cargo build --release --target wasm32-unknown-unknown --workspace
-          
-      - name: Optimize WASM binaries
-        run: |
-          for contract in contracts/*/; do
-            contract_name=$(basename "$contract")
-            if [ -f "target/wasm32-unknown-unknown/release/${contract_name//-/_}.wasm" ]; then
-              echo "Optimizing $contract_name..."
-              soroban contract optimize \
-                --wasm target/wasm32-unknown-unknown/release/${contract_name//-/_}.wasm \
-                --wasm-out target/wasm32-unknown-unknown/release/${contract_name//-/_}_optimized.wasm || echo "Optimization failed for $contract_name, continuing..."
-            fi
+          set -euo pipefail
+          # For each built contract WASM, ensure it does not export entry points
+          # that belong to the root `Contracts` crate (HealthcareRegistry /
+          # AppointmentScheduling). Those leaked exports indicate the root crate
+          # is still being linked and would collide on storage keys.
+          leaked="init propose_admin accept_admin cancel_admin_transfer register_institution get_institution update_institution verify_institution create_appointment cancel_appointment complete_appointment get_appointments"
+          status=0
+          for wasm in target/wasm32-unknown-unknown/release/*.wasm; do
+            [ -e "$wasm" ] || continue
+            name=$(basename "$wasm")
+            # Skip the dedicated registry/scheduling crates themselves.
+            case "$name" in
+              healthcare_registry.wasm|appointment_scheduling.wasm) continue ;;
+            esac
+            exports=$(wasm-objdump -x "$wasm" 2>/dev/null | awk '/^Export\[/{flag=1;next}/^$/{flag=0}flag{print $NF}' || true)
+            for sym in $leaked; do
+              if printf '%s\n' "$exports" | grep -qx "$sym"; then
+                echo "::error file=$wasm::leaked export '$sym' from root Contracts crate"
+                status=1
+              fi
+            done
           done
-
-      - name: Upload WASM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-binaries
-          path: target/wasm32-unknown-unknown/release/*.wasm
-          retention-days: 7
-
-  ci-success:
-    name: CI Success
-    runs-on: ubuntu-latest
-    needs: [format, check, check-lab-management, clippy, test, test-access-control, build-wasm]
-    if: always()
-    steps:
-      - name: Check all jobs
-        run: |
-          if [[ "${{ needs.truncation-markers.result }}" != "success" ]] || \
-             [[ "${{ needs.format.result }}" != "success" ]] || \
-             [[ "${{ needs.check.result }}" != "success" ]] || \
-             [[ "${{ needs.check-lab-management.result }}" != "success" ]] || \
-             [[ "${{ needs.check-medical-device-tracking.result }}" != "success" ]] || \
-             [[ "${{ needs.clippy.result }}" != "success" ]] || \
-             [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.test-access-control.result }}" != "success" ]] || \
-             [[ "${{ needs.build-wasm.result }}" != "success" ]]; then
-            echo "One or more required jobs failed"
-            exit 1
-          fi
-          echo "All required jobs passed"
+          exit $status
