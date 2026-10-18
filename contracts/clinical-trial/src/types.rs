@@ -34,6 +34,16 @@ pub struct EligibilityResult {
     pub evaluation_artifacts: Vec<RuleEvaluationArtifact>,
 }
 
+/// Stored, time-bounded eligibility attestation keyed by (trial, patient).
+/// Enrollment paths must require a valid, unexpired, passing attestation.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct EligibilityAttestation {
+    pub result: EligibilityResult,
+    pub evaluated_at: u64,
+    pub expires_at: u64,
+}
+
 /// Type of evidence used for eligibility checks.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -280,4 +290,8 @@ pub enum DataKey {
     AmendmentLog(u64),
     /// Current informed-consent document hash for a trial, set by the PI.
     ConsentVersion(u64),
+    /// Stored eligibility attestation keyed by (trial_record_id, patient).
+    EligibilityAttestation(u64, Address),
+    /// Per-trial study-arm allocation ratio (arm -> weight), set by the PI.
+    ArmAllocation(u64),
 }
