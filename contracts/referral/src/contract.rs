@@ -8,11 +8,42 @@ pub struct ReferralContract;
 
 #[contractimpl]
 impl ReferralContract {
-    pub fn initialize(env: Env, provider_registry: Address) -> Result<(), Error> {
+    pub fn initialize(env: Env, admin: Address, provider_registry: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        validate_nonzero_address(&admin).map_err(|_| Error::InvalidAddress)?;
+        validate_nonzero_address(&provider_registry).map_err(|_| Error::InvalidAddress)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::ProviderRegistry, &provider_registry);
+        Ok(())
+    }
+
+    pub fn set_provider_registry(
+        env: Env,
+        admin: Address,
+        provider_registry: Address,
+    ) -> Result<(), Error> {
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if stored_admin != admin {
+            return Err(Error::NotAuthorized);
+        }
+        admin.require_auth();
         validate_nonzero_address(&provider_registry).map_err(|_| Error::InvalidAddress)?;
         env.storage()
             .instance()
             .set(&DataKey::ProviderRegistry, &provider_registry);
+        env.events().publish(
+            (Symbol::new(&env, "provider_registry_updated"),),
+            provider_registry,
+        );
         Ok(())
     }
 
@@ -228,134 +259,6 @@ impl ReferralContract {
         }
 
         if !Self::is_valid_status_transition(&referral.status, &new_status) {
-            return Err(Error::InvalidStatusTransition);
-        }
+            ret
 
-        // Keep the timestamp fields consistent with what the dedicated
-        // accept_referral / complete_referral functions record for the
-        // corresponding transitions.
-        if new_status == ReferralStatus::Accepted {
-            referral.accepted_at = Some(env.ledger().timestamp());
-        }
-        if new_status == ReferralStatus::Completed {
-            referral.completed_at = Some(env.ledger().timestamp());
-        }
-
-        referral.status = new_status;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Referral(referral_id), &referral);
-        env.events().publish(
-            (Symbol::new(&env, "referral_status_updated"), referral_id),
-            (status, status_note),
-        );
-
-        Ok(())
-    }
-
-    pub fn complete_referral(
-        env: Env,
-        referral_id: u64,
-        receiving_provider: Address,
-        consultation_summary_hash: BytesN<32>,
-        recommendations: String,
-        followup_required: bool,
-    ) -> Result<(), Error> {
-        validate_nonzero_address(&receiving_provider).map_err(|_| Error::InvalidAddress)?;
-        receiving_provider.require_auth();
-
-        let mut referral: Referral = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Referral(referral_id))
-            .ok_or(Error::ReferralNotFound)?;
-
-        if referral.receiving_provider != receiving_provider {
-            return Err(Error::NotAuthorized);
-        }
-
-        // Cannot complete unless it has at least been accepted
-        match referral.status {
-            ReferralStatus::Pending | ReferralStatus::Declined | ReferralStatus::Cancelled => {
-                return Err(Error::InvalidStatusTransition)
-            }
-            _ => {}
-        }
-
-        referral.status = ReferralStatus::Completed;
-        referral.completed_at = Some(env.ledger().timestamp());
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Referral(referral_id), &referral);
-        env.events().publish(
-            (Symbol::new(&env, "referral_completed"), referral_id),
-            (
-                consultation_summary_hash,
-                recommendations,
-                followup_required,
-            ),
-        );
-
-        Ok(())
-    }
-
-    pub fn share_care_summary(
-        env: Env,
-        referral_id: u64,
-        from_provider: Address,
-        summary_type: Symbol,
-        summary_hash: BytesN<32>,
-    ) -> Result<(), Error> {
-        validate_nonzero_address(&from_provider).map_err(|_| Error::InvalidAddress)?;
-        from_provider.require_auth();
-
-        let referral: Referral = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Referral(referral_id))
-            .ok_or(Error::ReferralNotFound)?;
-
-        if referral.receiving_provider != from_provider
-            && referral.referring_provider != from_provider
-        {
-            return Err(Error::NotAuthorized);
-        }
-
-        env.events().publish(
-            (Symbol::new(&env, "care_summary_shared"), referral_id),
-            (from_provider, summary_type, summary_hash),
-        );
-
-        Ok(())
-    }
-
-    pub fn request_care_summary(
-        env: Env,
-        referral_id: u64,
-        requesting_provider: Address,
-        information_needed: Vec<String>,
-    ) -> Result<(), Error> {
-        validate_nonzero_address(&requesting_provider).map_err(|_| Error::InvalidAddress)?;
-        requesting_provider.require_auth();
-
-        let referral: Referral = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Referral(referral_id))
-            .ok_or(Error::ReferralNotFound)?;
-
-        if referral.receiving_provider != requesting_provider
-            && referral.referring_provider != requesting_provider
-        {
-            return Err(Error::NotAuthorized);
-        }
-
-        env.events().publish(
-            (Symbol::new(&env, "care_summary_requested"), referral_id),
-            (requesting_provider, information_needed),
-        );
-
-        Ok(())
-    }
-}
+/* … truncated 4079 chars — edit only what you need near the top … */
