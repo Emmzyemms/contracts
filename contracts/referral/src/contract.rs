@@ -65,7 +65,7 @@ impl ReferralContract {
         patient_id: Address,
         referred_to: Address,
         specialty: Symbol,
-        reason: String,
+        reason_hash: BytesN<32>,
         priority: Symbol,
         clinical_summary_hash: BytesN<32>,
         requested_services: Vec<String>,
@@ -75,9 +75,17 @@ impl ReferralContract {
         validate_nonzero_address(&referred_to).map_err(|_| Error::InvalidAddress)?;
         referring_provider.require_auth();
 
+        if !Self::is_provider_registered(&env, &referring_provider) {
+            return Err(Error::ProviderNotRegistered);
+        }
+
         if !Self::is_provider_registered(&env, &referred_to) {
             return Err(Error::ProviderNotRegistered);
         }
+
+        // Patient consent: the patient must co-sign the disclosure of their
+        // information to the receiving provider.
+        patient_id.require_auth();
 
         let referral_id = safe_increment(&env, &DataKey::ReferralCount);
 
@@ -87,7 +95,7 @@ impl ReferralContract {
             receiving_provider: referred_to,
             patient_id,
             specialty,
-            reason,
+            reason_hash,
             priority,
             status: ReferralStatus::Pending,
             created_at: env.ledger().timestamp(),
@@ -231,34 +239,6 @@ impl ReferralContract {
             return Err(Error::NotAuthorized);
         }
 
-        let new_status = if status == Symbol::new(&env, "Pending") {
-            ReferralStatus::Pending
-        } else if status == Symbol::new(&env, "Accepted") {
-            ReferralStatus::Accepted
-        } else if status == Symbol::new(&env, "Declined") {
-            ReferralStatus::Declined
-        } else if status == Symbol::new(&env, "Scheduled") {
-            ReferralStatus::Scheduled
-        } else if status == Symbol::new(&env, "InProgress") {
-            ReferralStatus::InProgress
-        } else if status == Symbol::new(&env, "Completed") {
-            ReferralStatus::Completed
-        } else if status == Symbol::new(&env, "Cancelled") {
-            ReferralStatus::Cancelled
-        } else {
-            return Err(Error::InvalidStatusTransition);
-        };
+        let new_status = if status == Symbol::new(&env, "Pending") 
 
-        if referral.receiving_provider != provider_id
-            && matches!(
-                &new_status,
-                ReferralStatus::Accepted | ReferralStatus::Declined | ReferralStatus::Completed
-            )
-        {
-            return Err(Error::NotAuthorized);
-        }
-
-        if !Self::is_valid_status_transition(&referral.status, &new_status) {
-            ret
-
-/* … truncated 4079 chars — edit only what you need near the top … */
+/* … truncated 1165 chars — edit only what you need near the top … */

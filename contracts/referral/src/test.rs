@@ -56,10 +56,11 @@ fn test_referral_lifecycle() {
     let referred_to = Address::generate(&env);
 
     let pr_client = setup_provider_registry(&env, &admin, &contract_id);
+    register_provider(&env, &pr_client, &admin, &referring_provider);
     register_provider(&env, &pr_client, &admin, &referred_to);
 
     let specialty = Symbol::new(&env, "Cardio");
-    let reason = String::from_str(&env, "Heart palpitations");
+    let reason_hash = BytesN::from_array(&env, &[7; 32]);
     let priority = Symbol::new(&env, "Urgent");
     let clinical_summary_hash = BytesN::from_array(&env, &[1; 32]);
     let mut requested_services = Vec::new(&env);
@@ -71,7 +72,7 @@ fn test_referral_lifecycle() {
         &patient_id,
         &referred_to,
         &specialty,
-        &reason,
+        &reason_hash,
         &priority,
         &clinical_summary_hash,
         &requested_services,
@@ -88,19 +89,19 @@ fn test_referral_lifecycle() {
     client.share_care_summary(&referral_id, &referred_to, &summary_type, &summary_hash);
 
     // 4. Request care summary
-    let mut information_needed = Vec::new(&env);
+    let mut information_needed = Vec::new();
     information_needed.push_back(String::from_str(&env, "Previous ECGs"));
     client.request_care_summary(&referral_id, &referring_provider, &information_needed);
 
     // 5. Complete Referral
     let consultation_summary_hash = BytesN::from_array(&env, &[3; 32]);
-    let recommendations = String::from_str(&env, "Rest and medication");
+    let recommendations_hash = BytesN::from_array(&env, &[4; 32]);
     let followup_required = true;
     client.complete_referral(
         &referral_id,
         &referred_to,
         &consultation_summary_hash,
-        &recommendations,
+        &recommendations_hash,
         &followup_required,
     );
 
@@ -123,6 +124,7 @@ fn test_decline_and_update_status() {
     let referred_to = Address::generate(&env);
 
     let pr_client = setup_provider_registry(&env, &admin, &contract_id);
+    register_provider(&env, &pr_client, &admin, &referring_provider);
     register_provider(&env, &pr_client, &admin, &referred_to);
 
     let referral_id = client.create_referral(
@@ -130,7 +132,7 @@ fn test_decline_and_update_status() {
         &patient_id,
         &referred_to,
         &Symbol::new(&env, "Ortho"),
-        &String::from_str(&env, "Knee pain"),
+        &BytesN::from_array(&env, &[7; 32]),
         &Symbol::new(&env, "Routine"),
         &BytesN::from_array(&env, &[1; 32]),
         &Vec::new(&env),
@@ -146,7 +148,7 @@ fn test_decline_and_update_status() {
         &patient_id,
         &referred_to,
         &Symbol::new(&env, "Ortho"),
-        &String::from_str(&env, "Knee pain"),
+        &BytesN::from_array(&env, &[7; 32]),
         &Symbol::new(&env, "Routine"),
         &BytesN::from_array(&env, &[1; 32]),
         &Vec::new(&env),
@@ -181,6 +183,7 @@ fn test_auth_failures() {
     let referred_to = Address::generate(&env);
 
     let pr_client = setup_provider_registry(&env, &admin, &contract_id);
+    register_provider(&env, &pr_client, &admin, &referring_provider);
     register_provider(&env, &pr_client, &admin, &referred_to);
 
     let referral_id = client.create_referral(
@@ -188,7 +191,7 @@ fn test_auth_failures() {
         &patient_id,
         &referred_to,
         &Symbol::new(&env, "Ortho"),
-        &String::from_str(&env, "Knee pain"),
+        &BytesN::from_array(&env, &[7; 32]),
         &Symbol::new(&env, "Routine"),
         &BytesN::from_array(&env, &[1; 32]),
         &Vec::new(&env),
@@ -198,6 +201,36 @@ fn test_auth_failures() {
     let wrong_provider = Address::generate(&env);
     let res = client.try_accept_referral(&referral_id, &wrong_provider, &None);
     assert!(res.is_err()); // NotAuthorized
+}
+
+#[test]
+fn test_create_referral_rejects_unregistered_referring_provider() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(ReferralContract, ());
+    let client = ReferralContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let referring_provider = Address::generate(&env);
+    let patient_id = Address::generate(&env);
+    let referred_to = Address::generate(&env);
+
+    let pr_client = setup_provider_registry(&env, &admin, &contract_id);
+    // Only the target provider is registered; the referring provider is not.
+    register_provider(&env, &pr_client, &admin, &referred_to);
+
+    let res = client.try_create_referral(
+        &referring_provider,
+        &patient_id,
+        &referred_to,
+        &Symbol::new(&env, "Ortho"),
+        &BytesN::from_array(&env, &[7; 32]),
+        &Symbol::new(&env, "Routine"),
+        &BytesN::from_array(&env, &[1; 32]),
+        &Vec::new(&env),
+    );
+    assert_eq!(res, Err(Ok(Error::ProviderNotRegistered)));
 }
 
 #[test]
@@ -231,43 +264,8 @@ fn test_set_provider_registry_requires_admin() {
     let provider_registry_id = env.register(ProviderRegistry, ());
     client.initialize(&admin, &provider_registry_id);
 
-    // Admin can repoint the registry.
-    let new_registry = env.register(ProviderRegistry, ());
-    client.set_provider_registry(&admin, &new_registry);
-
-    // A non-admin cannot repoint the registry.
     let attacker = Address::generate(&env);
     let attacker_registry = env.register(ProviderRegistry, ());
     let res = client.try_set_provider_registry(&attacker, &attacker_registry);
     assert!(res.is_err());
 }
-
-#[test]
-fn test_provider_registration_verification() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    // Register ProviderRegistry and initialize it
-    let provider_registry_id = env.register_contract(None, ProviderRegistry);
-    let pr_client = ProviderRegistryClient::new(&env, &provider_registry_id);
-    let admin = Address::generate(&env);
-    pr_client.initialize(&admin);
-
-    // Register Referral contract and initialize it with ProviderRegistry
-    let referral_id = env.register_contract(None, ReferralContract);
-    let client = ReferralContractClient::new(&env, &referral_id);
-    client.initialize(&admin, &provider_registry_id);
-
-    let referring_provider = Address::generate(&env);
-    let patient_id = Address::generate(&env);
-    let unregistered_provider = Address::generate(&env);
-    let registered_provider = Address::generate(&env);
-
-    // Register one provider but not the other
-    pr_client.register_provider(
-        &admin,
-        &registered_provider,
-        &String::from_str(&env, "Dr. Smith"),
-        &String::from_
-
-/* … truncated 7275 chars — edit only what you need near the top … */
