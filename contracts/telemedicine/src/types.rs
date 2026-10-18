@@ -29,6 +29,8 @@ pub enum Error {
     ProviderNotRegistered = 17,
     /// Caller is not a credentialed/verified provider; admin co-signature required
     ProviderNotVerified = 18,
+    /// Provider registry address has not been configured by the admin
+    ProviderRegistryNotSet = 19,
 }
 
 /// On-chain record of a provider's license in a given jurisdiction (state/region).
