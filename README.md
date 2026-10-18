@@ -391,3 +391,6 @@ cargo test --test integration_tests
 
 <!-- handsoff-issue-941 -->
 - #941: [patient-registry] Test suite does not compile — 95 errors from nonce parameters added in #776
+
+<!-- handsoff-issue-974 -->
+- #974: [telemedicine] Interstate compact licensing never matches — string_contains_state parses the ScVal type tag as the string length
