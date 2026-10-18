@@ -391,3 +391,6 @@ cargo test --test integration_tests
 
 <!-- handsoff-issue-941 -->
 - #941: [patient-registry] Test suite does not compile — 95 errors from nonce parameters added in #776
+
+<!-- handsoff-issue-988 -->
+- #988: [healthcare-credentialing] verify_credential counts repeated verifications of one credential type — a single verifier can push a case to committee review
