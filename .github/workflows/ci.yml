@@ -273,7 +273,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -295,55 +295,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-wasm-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-wasm-build-
+            ${{ runner.os }}-cargo-build-target-
 
-      - name: Install soroban-cli
-        run: |
-          cargo install --locked soroban-cli
-
-      - name: Build WASM binaries
-        run: |
-          cargo build --release --target wasm32-unknown-unknown --workspace
-          
-      - name: Optimize WASM binaries
-        run: |
-          for contract in contracts/*/; do
-            contract_name=$(basename "$contract")
-            if [ -f "target/wasm32-unknown-unknown/release/${contract_name//-/_}.wasm" ]; then
-              echo "Optimizing $contract_name..."
-              soroban contract optimize \
-                --wasm target/wasm32-unknown-unknown/release/${contract_name//-/_}.wasm \
-                --wasm-out target/wasm32-unknown-unknown/release/${contract_name//-/_}_optimized.wasm || echo "Optimization failed for $contract_name, continuing..."
-            fi
-          done
+      - name: Build WASM contracts
+        run: cargo build --target wasm32v1-none --release
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wasm-binaries
-          path: target/wasm32-unknown-unknown/release/*.wasm
-          retention-days: 7
-
-  ci-success:
-    name: CI Success
-    runs-on: ubuntu-latest
-    needs: [format, check, check-lab-management, clippy, test, test-access-control, build-wasm]
-    if: always()
-    steps:
-      - name: Check all jobs
-        run: |
-          if [[ "${{ needs.truncation-markers.result }}" != "success" ]] || \
-             [[ "${{ needs.format.result }}" != "success" ]] || \
-             [[ "${{ needs.check.result }}" != "success" ]] || \
-             [[ "${{ needs.check-lab-management.result }}" != "success" ]] || \
-             [[ "${{ needs.check-medical-device-tracking.result }}" != "success" ]] || \
-             [[ "${{ needs.clippy.result }}" != "success" ]] || \
-             [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.test-access-control.result }}" != "success" ]] || \
-             [[ "${{ needs.build-wasm.result }}" != "success" ]]; then
-            echo "One or more required jobs failed"
-            exit 1
-          fi
-          echo "All required jobs passed"
+          name: wasm-contracts
+          path: target/wasm32v1-none/release/*.wasm
