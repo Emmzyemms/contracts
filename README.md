@@ -391,3 +391,6 @@ cargo test --test integration_tests
 
 <!-- handsoff-issue-941 -->
 - #941: [patient-registry] Test suite does not compile — 95 errors from nonce parameters added in #776
+
+<!-- handsoff-issue-983 -->
+- #983: [workspace] Storage writes followed by `return Err` are silently rolled back — remaining occurrences and a CI guard
