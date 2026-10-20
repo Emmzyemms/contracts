@@ -341,13 +341,9 @@ impl MultisigGovernance {
 
         proposal.approvals.push_back(signer.clone());
 
-        let finalize_result = Self::try_finalize(&env, &mut proposal);
+        Self::try_finalize(&env, &mut proposal)?;
 
-        // Persist the approval regardless of the finalize outcome so a
-        // `QuorumNotMet` error doesn't erase the caller's already-cast vote.
         env.storage().persistent().set(&key, &proposal);
-
-        finalize_result?;
 
         env.events()
             .publish((symbol_short!("approved"), action_id), signer);
@@ -683,12 +679,8 @@ impl MultisigGovernance {
         let approvals = proposal.approvals.len();
         let participation = proposal.approvals.len() + proposal.abstentions.len();
 
-        if approvals >= threshold {
-            if participation < quorum_min {
-                return Err(Error::QuorumNotMet);
-            }
+        if approvals >= threshold && participation >= quorum_min {
             proposal.status = ProposalStatus::Executed;
-            return Ok(());
         }
         Ok(())
     }
