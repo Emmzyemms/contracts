@@ -2,7 +2,7 @@
 #![allow(deprecated)]
 
 use super::*;
-use insurer_registry::{InsurerRegistry, InsurerRegistryClient};
+use insurer_registry::{InsurerRegistry, InsurerRegistryClient, MAX_CREDENTIAL_LIFETIME};
 use shared::privacy::PolicyMetadata;
 use soroban_sdk::{contract, contractimpl, testutils::{Address as _, Ledger}, BytesN, Env, String, Symbol, Vec};
 
@@ -55,9 +55,12 @@ fn dummy_hash(env: &Env, byte: u8) -> BytesN<32> {
 }
 
 fn register_active_insurer(env: &Env, insurer: &Address) -> Address {
-    let ir_id = env.register_contract(None, InsurerRegistry);
+    env.mock_all_auths();
+    let registry_admin = Address::generate(env);
+    let ir_id = env.register(InsurerRegistry, (registry_admin.clone(),));
     let ir_client = InsurerRegistryClient::new(env, &ir_id);
     let issuer = Address::generate(env);
+    ir_client.set_trusted_issuer(&registry_admin, &issuer, &true);
     ir_client.register_insurer(
         insurer,
         &String::from_str(env, "Claims Insurer"),
@@ -66,7 +69,7 @@ fn register_active_insurer(env: &Env, insurer: &Address) -> Address {
         &dummy_hash(env, 1),
         &issuer,
         &dummy_hash(env, 2),
-        &4_100_000_000_u64,
+        &(env.ledger().timestamp() + MAX_CREDENTIAL_LIFETIME),
         &dummy_hash(env, 3),
     );
     ir_id
@@ -761,10 +764,12 @@ fn test_integration_expired_insurer_returns_insurer_not_active() {
     let patient = Address::generate(&env);
     let insurer = Address::generate(&env);
 
-    let ir_id = env.register_contract(None, InsurerRegistry);
+    let registry_admin = Address::generate(&env);
+    let ir_id = env.register(InsurerRegistry, (registry_admin.clone(),));
     let ir_client = InsurerRegistryClient::new(&env, &ir_id);
     let issuer = Address::generate(&env);
     env.ledger().with_mut(|li| li.timestamp = 100);
+    ir_client.set_trusted_issuer(&registry_admin, &issuer, &true);
     ir_client.register_insurer(
         &insurer,
         &String::from_str(&env, "Expired Insurer"),
