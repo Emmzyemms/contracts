@@ -392,8 +392,5 @@ cargo test --test integration_tests
 <!-- handsoff-issue-941 -->
 - #941: [patient-registry] Test suite does not compile — 95 errors from nonce parameters added in #776
 
-<!-- handsoff-issue-967 -->
-- #967: [upgrade-governance] Governance can only upgrade itself — none of the 40+ healthcare contracts expose an upgrade entry point
-
-<!-- handsoff-issue-968 -->
-- #968: [upgrade-governance] Proposals approved during the final 24h of the voting window can never be executed
+<!-- handsoff-issue-974 -->
+- #974: [telemedicine] Interstate compact licensing never matches — string_contains_state parses the ScVal type tag as the string length
