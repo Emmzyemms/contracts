@@ -1,6 +1,8 @@
 #![cfg(test)]
 #![allow(deprecated)]
 
+extern crate std;
+
 use super::*;
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String, Symbol, Vec};
 
@@ -14,14 +16,23 @@ fn setup_client(env: &Env) -> MedicalDeviceRegistryClient<'_> {
     MedicalDeviceRegistryClient::new(env, &contract_id)
 }
 
+fn get_udi(client: &MedicalDeviceRegistryClient, device_id: u64) -> String {
+    client.get_device_record(&device_id).device_udi
+}
+
 fn register_device_helper(
     env: &Env,
     client: &MedicalDeviceRegistryClient,
     manufacturer_id: &Address,
 ) -> u64 {
+    if !client.is_manufacturer_allowlisted(manufacturer_id) {
+        client.allowlist_manufacturer(&client.get_regulator(), manufacturer_id);
+    }
+    let count = client.get_device_count();
+    let udi_str = std::format!("UDI-12345-{count}");
     client.register_device(
         manufacturer_id,
-        &String::from_str(env, "UDI-12345-ABC"),
+        &String::from_str(env, &udi_str),
         &Symbol::new(env, "IMPLANT"),
         &String::from_str(env, "MedCorp"),
         &String::from_str(env, "MC-100"),
@@ -55,6 +66,7 @@ fn test_register_device_with_expiration() {
 
     let client = setup_client(&env);
     let manufacturer = Address::generate(&env);
+    client.allowlist_manufacturer(&client.get_regulator(), &manufacturer);
 
     let id = client.register_device(
         &manufacturer,
@@ -86,7 +98,7 @@ fn test_implant_device() {
 
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Left Hip"),
@@ -117,7 +129,7 @@ fn test_implant_device_nonexistent_returns_error() {
 
     let res = client.try_implant_device(
         &patient_id,
-        &999u64,
+        &String::from_str(&env, "NONEXISTENT-UDI"),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Left Hip"),
@@ -176,7 +188,7 @@ fn test_record_device_maintenance() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Lumbar Spine"),
@@ -263,7 +275,7 @@ fn test_notify_affected_patients() {
 
     client.implant_device(
         &patient1,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider,
         &1700000000u64,
         &String::from_str(&env, "Left Knee"),
@@ -271,7 +283,7 @@ fn test_notify_affected_patients() {
     );
     client.implant_device(
         &patient2,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider,
         &1700100000u64,
         &String::from_str(&env, "Right Knee"),
@@ -312,7 +324,7 @@ fn test_notify_affected_patients_excludes_removed() {
 
     let implant_id1 = client.implant_device(
         &patient1,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider,
         &1700000000u64,
         &String::from_str(&env, "Chest"),
@@ -320,7 +332,7 @@ fn test_notify_affected_patients_excludes_removed() {
     );
     client.implant_device(
         &patient2,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider,
         &1700100000u64,
         &String::from_str(&env, "Abdomen"),
@@ -379,7 +391,7 @@ fn test_notify_affected_patients_rejects_unauthorized_caller() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     client.implant_device(
         &patient,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider,
         &1700000000u64,
         &String::from_str(&env, "Left Knee"),
@@ -420,7 +432,7 @@ fn test_notify_affected_patients_allows_configured_regulator() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     client.implant_device(
         &patient,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider,
         &1700000000u64,
         &String::from_str(&env, "Left Knee"),
@@ -460,7 +472,7 @@ fn test_remove_implant() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Right Hip"),
@@ -518,7 +530,7 @@ fn test_remove_implant_already_inactive() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Shoulder"),
@@ -559,7 +571,7 @@ fn test_remove_implant_rejects_unauthorized_provider() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Shoulder"),
@@ -592,7 +604,7 @@ fn test_falsely_removed_implant_cannot_suppress_recall_notification() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Chest"),
@@ -641,7 +653,7 @@ fn test_track_device_performance_no_complications() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Spine L4"),
@@ -670,7 +682,7 @@ fn test_track_device_performance_with_complications() {
     let device_id = register_device_helper(&env, &client, &manufacturer);
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Left Knee"),
@@ -725,7 +737,7 @@ fn test_get_patient_implants_active_only_filter() {
 
     let implant_id1 = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Hip"),
@@ -733,7 +745,7 @@ fn test_get_patient_implants_active_only_filter() {
     );
     client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1705000000u64,
         &String::from_str(&env, "Knee"),
@@ -887,7 +899,7 @@ fn test_track_device_performance_patient_mismatch() {
     // Implant device for patient_a
     let implant_id = client.implant_device(
         &patient_a,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Left Hip"),
@@ -929,6 +941,7 @@ fn test_schedule_next_maintenance_rejects_unauthorized_caller() {
 
     let manufacturer = Address::generate(&env);
     let stranger = Address::generate(&env);
+    client.allowlist_manufacturer(&client.get_regulator(), &manufacturer);
 
     let device_id = client.register_device(
         &manufacturer,
@@ -961,6 +974,7 @@ fn test_schedule_next_maintenance_allows_manufacturer() {
     let client = setup_client(&env);
 
     let manufacturer = Address::generate(&env);
+    client.allowlist_manufacturer(&client.get_regulator(), &manufacturer);
 
     let device_id = client.register_device(
         &manufacturer,
@@ -996,6 +1010,7 @@ fn test_schedule_next_maintenance_allows_technician_with_history() {
     let provider_id = Address::generate(&env);
     let technician = Address::generate(&env);
     let manufacturer = Address::generate(&env);
+    client.allowlist_manufacturer(&client.get_regulator(), &manufacturer);
 
     let device_id = client.register_device(
         &manufacturer,
@@ -1015,7 +1030,7 @@ fn test_schedule_next_maintenance_allows_technician_with_history() {
 
     let implant_id = client.implant_device(
         &patient_id,
-        &device_id,
+        &get_udi(&client, device_id),
         &provider_id,
         &1700000000u64,
         &String::from_str(&env, "Left Hip"),
@@ -1037,3 +1052,173 @@ fn test_schedule_next_maintenance_allows_technician_with_history() {
 
     assert!(client.check_maintenance_due(&device_id, &(completed_date + 90 * 86400)));
 }
+
+#[test]
+fn test_unallowlisted_manufacturer_cannot_register_device() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = setup_client(&env);
+    let manufacturer = Address::generate(&env);
+
+    let res = client.try_register_device(
+        &manufacturer,
+        &String::from_str(&env, "UDI-UNAUTH-1"),
+        &Symbol::new(&env, "IMPLANT"),
+        &String::from_str(&env, "FakeCorp"),
+        &String::from_str(&env, "FC-1"),
+        &String::from_str(&env, "LOT-01"),
+        &1690000000u64,
+        &None,
+        &dummy_hash(&env),
+        &DeviceExtras { warranty_expiration_date: None, maintenance_interval_days: None },
+    );
+    assert_eq!(res.unwrap_err().unwrap(), Error::ManufacturerNotAuthorized);
+}
+
+#[test]
+fn test_duplicate_udi_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = setup_client(&env);
+    let regulator = client.get_regulator();
+    let manufacturer_a = Address::generate(&env);
+    let manufacturer_b = Address::generate(&env);
+
+    client.allowlist_manufacturer(&regulator, &manufacturer_a);
+    client.allowlist_manufacturer(&regulator, &manufacturer_b);
+
+    let udi = String::from_str(&env, "UDI-GLOBAL-UNIQUE-1");
+
+    let id1 = client.register_device(
+        &manufacturer_a,
+        &udi,
+        &Symbol::new(&env, "IMPLANT"),
+        &String::from_str(&env, "RealCorp"),
+        &String::from_str(&env, "RC-1"),
+        &String::from_str(&env, "LOT-01"),
+        &1690000000u64,
+        &None,
+        &dummy_hash(&env),
+        &DeviceExtras { warranty_expiration_date: None, maintenance_interval_days: None },
+    );
+    assert_eq!(id1, 1);
+
+    // Attempting to register the same UDI (even from another manufacturer) must fail
+    let res = client.try_register_device(
+        &manufacturer_b,
+        &udi,
+        &Symbol::new(&env, "IMPLANT"),
+        &String::from_str(&env, "ShadowCorp"),
+        &String::from_str(&env, "SC-1"),
+        &String::from_str(&env, "LOT-02"),
+        &1690000000u64,
+        &None,
+        &dummy_hash(&env),
+        &DeviceExtras { warranty_expiration_date: None, maintenance_interval_days: None },
+    );
+    assert_eq!(res.unwrap_err().unwrap(), Error::DuplicateUdi);
+}
+
+#[test]
+fn test_implant_device_resolves_udi_correctly() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = setup_client(&env);
+    let regulator = client.get_regulator();
+    let manufacturer = Address::generate(&env);
+    let patient_id = Address::generate(&env);
+    let provider_id = Address::generate(&env);
+
+    client.allowlist_manufacturer(&regulator, &manufacturer);
+
+    let udi = String::from_str(&env, "UDI-PACEMAKER-42");
+    let dev_id = client.register_device(
+        &manufacturer,
+        &udi,
+        &Symbol::new(&env, "PACEMAKER"),
+        &String::from_str(&env, "HeartTech"),
+        &String::from_str(&env, "HT-10"),
+        &String::from_str(&env, "LOT-42"),
+        &1690000000u64,
+        &None,
+        &dummy_hash(&env),
+        &DeviceExtras { warranty_expiration_date: None, maintenance_interval_days: None },
+    );
+
+    let implant_id = client.implant_device(
+        &patient_id,
+        &udi,
+        &provider_id,
+        &1700000000u64,
+        &String::from_str(&env, "Chest"),
+        &dummy_hash(&env),
+    );
+    assert_eq!(implant_id, 1);
+
+    let requester = Address::generate(&env);
+    let implants = client.get_patient_implants(&patient_id, &requester, &true);
+    assert_eq!(implants.len(), 1);
+    assert_eq!(implants.get(0).unwrap().device_id, dev_id);
+}
+
+#[test]
+fn test_maintenance_schedule_checked_arithmetic_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = setup_client(&env);
+    let regulator = client.get_regulator();
+    let manufacturer = Address::generate(&env);
+    client.allowlist_manufacturer(&regulator, &manufacturer);
+
+    // Huge interval that overflows interval * 86400
+    let res = client.try_register_device(
+        &manufacturer,
+        &String::from_str(&env, "UDI-OVERFLOW-1"),
+        &Symbol::new(&env, "DME"),
+        &String::from_str(&env, "MedCorp"),
+        &String::from_str(&env, "MC-1"),
+        &String::from_str(&env, "LOT-1"),
+        &1690000000u64,
+        &None,
+        &dummy_hash(&env),
+        &DeviceExtras {
+            warranty_expiration_date: None,
+            maintenance_interval_days: Some(u64::MAX),
+        },
+    );
+    assert_eq!(res.unwrap_err().unwrap(), Error::ArithmeticOverflow);
+}
+
+#[test]
+fn test_regulator_allowlist_management() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = setup_client(&env);
+    let regulator = client.get_regulator();
+    let non_regulator = Address::generate(&env);
+    let manufacturer = Address::generate(&env);
+
+    assert!(!client.is_manufacturer_allowlisted(&manufacturer));
+
+    // Non-regulator cannot allowlist
+    let unauth_res = client.try_allowlist_manufacturer(&non_regulator, &manufacturer);
+    assert_eq!(unauth_res.unwrap_err().unwrap(), Error::NotAuthorized);
+
+    // Regulator can allowlist
+    client.allowlist_manufacturer(&regulator, &manufacturer);
+    assert!(client.is_manufacturer_allowlisted(&manufacturer));
+
+    // Non-regulator cannot revoke
+    let unauth_revoke = client.try_revoke_manufacturer(&non_regulator, &manufacturer);
+    assert_eq!(unauth_revoke.unwrap_err().unwrap(), Error::NotAuthorized);
+
+    // Regulator can revoke
+    client.revoke_manufacturer(&regulator, &manufacturer);
+    assert!(!client.is_manufacturer_allowlisted(&manufacturer));
+}
+

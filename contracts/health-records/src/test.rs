@@ -1341,7 +1341,8 @@ mod consent_scope_tests {
 
         let record_id = client.create_record(&patient, &provider, &reference, &initial_category, &rdesc, &policy(&env));
 
-        let initial_records = client.get_records_by_category(&initial_category);
+        let admin = client.get_admin();
+        let initial_records = client.get_records_by_category(&admin, &initial_category, &0u32);
         assert_eq!(initial_records.len(), 1);
         assert_eq!(initial_records.get(0).unwrap(), record_id);
 
@@ -1356,10 +1357,10 @@ mod consent_scope_tests {
             &policy(&env),
         );
 
-        let old_category_records = client.get_records_by_category(&initial_category);
+        let old_category_records = client.get_records_by_category(&admin, &initial_category, &0u32);
         assert_eq!(old_category_records.len(), 0, "old category should not contain the record after category change");
 
-        let new_category_records = client.get_records_by_category(&new_category);
+        let new_category_records = client.get_records_by_category(&admin, &new_category, &0u32);
         assert_eq!(new_category_records.len(), 1);
         assert_eq!(new_category_records.get(0).unwrap(), record_id);
     }
@@ -1412,5 +1413,108 @@ mod consent_scope_tests {
             &new_nonce,
         );
         assert_eq!(updated_version, 2);
+    }
+
+    #[test]
+    fn test_issue_1003_write_authorization_consistency() {
+        let env = Env::default();
+        let (client, patient, provider) = setup(&env);
+        let reference = encrypted_ref(&env, 10);
+        let category = RecordCategory::Lab;
+        let rdesc = Some(String::from_str(&env, "Blood Test"));
+        let pol = policy(&env);
+
+        // Grant consent with can_write = true
+        env.mock_all_auths();
+        client.grant_consent(&patient, &provider, &full_scope(), &1u64);
+
+        // 1. Both create_record and create_records_batch succeed with only provider auth
+        let single_id = client.create_record(
+            &patient,
+            &provider,
+            &reference,
+            &category,
+            &rdesc,
+            &pol,
+            &1u64,
+        );
+        assert!(single_id > 0);
+
+        let mut batch_entries = Vec::new(&env);
+        batch_entries.push_back(crate::RecordInput {
+            patient: patient.clone(),
+            encrypted_ref: reference.clone(),
+            record_category: category.clone(),
+            record_description: rdesc.clone(),
+            policy: pol.clone(),
+        });
+        let batch_ids = client.create_records_batch(&provider, &batch_entries, &2u64);
+        assert_eq!(batch_ids.len(), 1);
+
+        // 2. Provider with read-only consent cannot write to either path
+        let other_provider = Address::generate(&env);
+        let read_only_scope = ConsentScope {
+            can_read: true,
+            can_write: false,
+            can_share: false,
+            expires_at: 0,
+        };
+        client.grant_consent(&patient, &other_provider, &read_only_scope, &2u64);
+
+        let single_err = client.try_create_record(
+            &patient,
+            &other_provider,
+            &reference,
+            &category,
+            &rdesc,
+            &pol,
+            &1u64,
+        );
+        assert_eq!(single_err.unwrap_err().unwrap(), Error::Unauthorized);
+
+        let mut unauthorized_batch = Vec::new(&env);
+        unauthorized_batch.push_back(crate::RecordInput {
+            patient: patient.clone(),
+            encrypted_ref: reference.clone(),
+            record_category: category.clone(),
+            record_description: rdesc.clone(),
+            policy: pol.clone(),
+        });
+        let batch_err = client.try_create_records_batch(&other_provider, &unauthorized_batch, &1u64);
+        assert_eq!(batch_err.unwrap_err().unwrap(), Error::Unauthorized);
+    }
+
+    #[test]
+    fn test_issue_1002_category_index_paged_buckets_and_auth() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, patient, provider) = setup(&env);
+        let admin = client.get_admin();
+        let unauthorized = Address::generate(&env);
+
+        client.grant_consent(&patient, &provider, &full_scope(), &1u64);
+
+        let category = RecordCategory::Consultation;
+        let reference = encrypted_ref(&env, 20);
+        let rdesc = Some(String::from_str(&env, "Consultation Note"));
+        let pol = policy(&env);
+
+        let id1 = client.create_record(&patient, &provider, &reference, &category, &rdesc, &pol, &1u64);
+
+        // Admin can fetch page 0
+        let page0 = client.get_records_by_category(&admin, &category, &0u32);
+        assert_eq!(page0.len(), 1);
+        assert_eq!(page0.get(0).unwrap(), id1);
+
+        // Unauthorized caller is rejected
+        let unauth_res = client.try_get_records_by_category(&unauthorized, &category, &0u32);
+        assert_eq!(unauth_res.unwrap_err().unwrap(), Error::Unauthorized);
+
+        // Analytics address can also fetch
+        let analytics = Address::generate(&env);
+        client.set_analytics_address(&admin, &analytics);
+        let analytics_res = client.get_records_by_category(&analytics, &category, &0u32);
+        assert_eq!(analytics_res.len(), 1);
+        assert_eq!(analytics_res.get(0).unwrap(), id1);
     }
 }
