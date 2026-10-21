@@ -63,6 +63,7 @@ pub enum Error {
     NotPendingAdmin    = 11,
     StaleNonce         = 12,
     AlreadyExists      = 13,
+    CredentialExpired  = 14,
 }
 
 /// Input entry for `batch_register_providers`.
@@ -89,6 +90,8 @@ pub enum BatchEntryStatus {
     /// Entry skipped because the address is already registered.
     AlreadyExists = 2,
     InvalidAddress = 6,
+    /// Entry skipped because `expires_at` is not in the future.
+    CredentialExpired = 7,
 }
 
 #[contracttype]
@@ -250,6 +253,9 @@ impl ProviderRegistry {
         validate_nonzero_address(&provider).map_err(|_| Error::InvalidAddress)?;
         validate_nonzero_address(&issuer).map_err(|_| Error::InvalidAddress)?;
         Self::assert_admin(&env, &admin)?;
+        if expires_at <= env.ledger().timestamp() {
+            return Err(Error::CredentialExpired);
+        }
         let key = DataKey::Provider(provider.clone());
         if env.storage().persistent().has(&key) {
             return Err(Error::AlreadyExists);
@@ -301,6 +307,11 @@ impl ProviderRegistry {
                 continue;
             }
 
+            if entry.expires_at <= env.ledger().timestamp() {
+                results.push_back(BatchEntryStatus::CredentialExpired);
+                continue;
+            }
+
             let key = DataKey::Provider(entry.provider.clone());
             if env.storage().persistent().has(&key) {
                 results.push_back(BatchEntryStatus::AlreadyExists);
@@ -331,17 +342,19 @@ impl ProviderRegistry {
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn assert_initialized(env: &Env) -> Result<(), Error> {
-        if !env.storage().persistent().has(&DataKey::Initialized) {
-            return Err(Error::NotInitialized);
+        if env.storage().persistent().has(&DataKey::Initialized) {
+            Ok(())
+        } else {
+            Err(Error::NotInitialized)
         }
-        Ok(())
     }
 
     fn assert_not_initialized(env: &Env) -> Result<(), Error> {
         if env.storage().persistent().has(&DataKey::Initialized) {
-            return Err(Error::AlreadyInitialized);
+            Err(Error::AlreadyInitialized)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn assert_admin(env: &Env, caller: &Address) -> Result<(), Error> {
@@ -353,6 +366,7 @@ impl ProviderRegistry {
         if &admin != caller {
             return Err(Error::Unauthorized);
         }
+        caller.require_auth();
         Ok(())
     }
 
