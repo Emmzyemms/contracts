@@ -5,6 +5,14 @@
 //! Maintains healthcare provider registry with credentials, specializations, network participation,
 //! and provider validation for access control decisions.
 //!
+//! ## Single source of truth for "active clinician"
+//!
+//! This contract is the canonical registry for whether an address is a trusted, active
+//! clinician. Other registries (doctor-registry, patient-registry's doctor flow,
+//! healthcare-credentialing) are deprecated or act as thin views over this contract.
+//! Committee decisions in healthcare-credentialing call `set_active` here so that a
+//! suspension/revocation in one place takes effect everywhere.
+//!
 //! ## HIPAA Compliance
 //!
 //! **Access Control Safeguards:** Admin-only provider registration. Provider authentication for
@@ -125,8 +133,8 @@ pub enum DataKey {
     RotationExpiry,
     /// Per-caller nonce for replay attack protection: (caller) -> u64
     CallerNonce(Address),
-    /// Historical credential anchors for a provider: (provider) -> Vec<CredentialAnchor>
-    CredentialHistory(Address),
+    /// Addresses authorised to update `active` (e.g. the healthcare-credentialing contract).
+    TrustedAuthority(Address),
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -143,6 +151,88 @@ impl ProviderRegistry {
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Initialized, &true);
         Ok(())
+    }
+
+    /// Authorise an external contract (e.g. healthcare-credentialing) to update the
+    /// `active` flag of providers. Admin-only. This is how committee decisions
+    /// (approve/suspend/revoke) propagate into the single source of truth.
+    pub fn set_trusted_authority(
+        env: Env,
+        admin: Address,
+        authority: Address,
+        trusted: bool,
+    ) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        validate_nonzero_address(&admin).map_err(|_| Error::InvalidAddress)?;
+        validate_nonzero_address(&authority).map_err(|_| Error::InvalidAddress)?;
+        Self::assert_admin(&env, &admin)?;
+        let key = DataKey::TrustedAuthority(authority.clone());
+        if trusted {
+            env.storage().persistent().set(&key, &true);
+        } else {
+            env.storage().persistent().remove(&key);
+        }
+        env.events().publish(
+            (symbol_short!("trust_auth"), authority),
+            trusted,
+        );
+        Ok(())
+    }
+
+    /// Update the `active` flag of a registered provider.
+    ///
+    /// Callable by the admin or by a trusted authority (e.g. the credentialing
+    /// committee contract). This is the single synchronisation point so that a
+    /// suspension/revocation in any committee workflow takes effect for every
+    /// consumer that reads `is_active_provider`.
+    pub fn set_active(
+        env: Env,
+        caller: Address,
+        provider: Address,
+        active: bool,
+    ) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        validate_nonzero_address(&caller).map_err(|_| Error::InvalidAddress)?;
+        validate_nonzero_address(&provider).map_err(|_| Error::InvalidAddress)?;
+        caller.require_auth();
+        Self::assert_admin_or_trusted(&env, &caller)?;
+
+        let key = DataKey::Provider(provider.clone());
+        let mut profile: ProviderProfile = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::NotAProvider)?;
+        profile.active = active;
+        env.storage().persistent().set(&key, &profile);
+        env.events().publish(
+            (symbol_short!("set_active"), provider),
+            active,
+        );
+        Ok(())
+    }
+
+    /// Returns true only if the provider is registered, marked active, and its
+    /// credential has not expired or been revoked. This is the canonical
+    /// "is this address a trusted clinician?" check consumers should use.
+    pub fn is_active_provider(env: Env, provider: Address) -> bool {
+        let key = DataKey::Provider(provider);
+        let profile: ProviderProfile = match env.storage().persistent().get(&key) {
+            Some(p) => p,
+            None => return false,
+        };
+        if !profile.active {
+            return false;
+        }
+        if profile.credential.revoked_at.is_some() {
+            return false;
+        }
+        if profile.credential.expires_at != 0
+            && env.ledger().timestamp() >= profile.credential.expires_at
+        {
+            return false;
+        }
+        true
     }
 
     pub fn register_provider(
@@ -249,72 +339,6 @@ impl ProviderRegistry {
         Ok(results)
     }
 
-    /// Renew an existing provider's credential without changing their address.
-    ///
-    /// Admin-only. Requires `new_expires_at > now`. The previous credential anchor
-    /// is appended to the provider's credential history for auditability, and a
-    /// `renew_cred` event is emitted. This is the only path that changes
-    /// `expires_at` after registration, so an expired provider can be restored
-    /// without re-registering under a new address.
-    pub fn renew_credential(
-        env: Env,
-        admin: Address,
-        provider: Address,
-        new_credential_hash: BytesN<32>,
-        new_attestation_hash: BytesN<32>,
-        new_expires_at: u64,
-    ) -> Result<(), Error> {
-        Self::assert_initialized(&env)?;
-        validate_nonzero_address(&admin).map_err(|_| Error::InvalidAddress)?;
-        validate_nonzero_address(&provider).map_err(|_| Error::InvalidAddress)?;
-        Self::assert_admin(&env, &admin)?;
-
-        if new_expires_at <= env.ledger().timestamp() {
-            return Err(Error::CredentialExpired);
-        }
-
-        let key = DataKey::Provider(provider.clone());
-        let mut profile: ProviderProfile = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(Error::NotAProvider)?;
-
-        // Preserve the previous anchor for auditability.
-        let history_key = DataKey::CredentialHistory(provider.clone());
-        let mut history: Vec<CredentialAnchor> = env
-            .storage()
-            .persistent()
-            .get(&history_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        history.push_back(profile.credential.clone());
-        env.storage().persistent().set(&history_key, &history);
-
-        profile.credential = CredentialAnchor {
-            credential_hash: new_credential_hash,
-            issuer: profile.credential.issuer.clone(),
-            attestation_hash: new_attestation_hash,
-            expires_at: new_expires_at,
-            revocation_reference: profile.credential.revocation_reference.clone(),
-            revoked_at: None,
-        };
-        env.storage().persistent().set(&key, &profile);
-
-        env.events().publish(
-            (symbol_short!("renew_cred"), provider),
-            new_expires_at,
-        );
-        Ok(())
-    }
-
-    /// Returns the historical credential anchors for a provider (oldest first).
-    pub fn get_credential_history(env: Env, provider: Address) -> Vec<CredentialAnchor> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::CredentialHistory(provider))
-            .unwrap_or_else(|| Vec::new(&env))
-    }
-
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn assert_initialized(env: &Env) -> Result<(), Error> {
@@ -344,5 +368,24 @@ impl ProviderRegistry {
         }
         caller.require_auth();
         Ok(())
+    }
+
+    fn assert_admin_or_trusted(env: &Env, caller: &Address) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if &admin == caller {
+            return Ok(());
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::TrustedAuthority(caller.clone()))
+        {
+            return Ok(());
+        }
+        Err(Error::Unauthorized)
     }
 }
