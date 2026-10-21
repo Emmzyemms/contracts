@@ -89,6 +89,23 @@ fn test_register_and_is_provider() {
 }
 
 #[test]
+fn test_provider_hospital_affiliation_requires_active_provider_and_matches_hospital() {
+    let (env, admin, client) = setup();
+    let provider = Address::generate(&env);
+    let hospital = Address::generate(&env);
+    let other_hospital = Address::generate(&env);
+
+    register_provider_with_anchor(&env, &client, &admin, &provider);
+    client.set_provider_hospital(&admin, &provider, &hospital, &true);
+
+    assert!(client.is_provider_affiliated(&provider, &hospital));
+    assert!(!client.is_provider_affiliated(&provider, &other_hospital));
+
+    client.revoke_provider(&admin, &provider);
+    assert!(!client.is_provider_affiliated(&provider, &hospital));
+}
+
+#[test]
 fn test_register_provider_exposes_profile() {
     let (env, admin, client) = setup();
     let provider = Address::generate(&env);

@@ -471,22 +471,81 @@ impl MedicalClaimsSystem {
         Ok(())
     }
 
-    pub fn get_claim(env: Env, claim_id: u64) -> Result<ClaimRecord, Error> {
-        Self::load_claim(&env, claim_id)
+    pub fn get_claim(
+        env: Env,
+        requester: Address,
+        claim_id: u64,
+    ) -> Result<ClaimRecord, Error> {
+        requester.require_auth();
+        let claim = Self::load_claim(&env, claim_id)?;
+        Self::authorize_claim_reader(&env, &requester, &claim)?;
+        Ok(claim)
     }
 
-    pub fn get_insurer_payments(env: Env, claim_id: u64) -> Vec<InsurerPaymentRecord> {
-        env.storage()
+    pub fn get_insurer_payments(
+        env: Env,
+        requester: Address,
+        claim_id: u64,
+    ) -> Result<Vec<InsurerPaymentRecord>, Error> {
+        requester.require_auth();
+        let claim = Self::load_claim(&env, claim_id)?;
+        Self::authorize_claim_reader(&env, &requester, &claim)?;
+        Ok(env.storage()
             .persistent()
             .get(&DataKey::ClaimPayment(claim_id))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env)))
     }
 
-    pub fn get_patient_payments(env: Env, claim_id: u64) -> Vec<PatientPaymentRecord> {
-        env.storage()
+    pub fn get_patient_payments(
+        env: Env,
+        requester: Address,
+        claim_id: u64,
+    ) -> Result<Vec<PatientPaymentRecord>, Error> {
+        requester.require_auth();
+        let claim = Self::load_claim(&env, claim_id)?;
+        Self::authorize_claim_reader(&env, &requester, &claim)?;
+        Ok(env.storage()
             .persistent()
             .get(&DataKey::PatientPayment(claim_id))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env)))
+    }
+
+    fn authorize_claim_reader(
+        env: &Env,
+        requester: &Address,
+        claim: &ClaimRecord,
+    ) -> Result<(), Error> {
+        if requester == &claim.patient_id
+            || requester == &claim.provider_id
+            || requester == &claim.insurer_id
+        {
+            return Ok(());
+        }
+
+        let admin: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+        if admin.as_ref() == Some(requester) {
+            return Ok(());
+        }
+
+        let is_deactivated: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DeactivatedReviewers(requester.clone()))
+            .unwrap_or(false);
+        if !is_deactivated {
+            let reviewers: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::AuthorizedReviewers)
+                .unwrap_or(Vec::new(env));
+            for reviewer in reviewers.iter() {
+                if reviewer == requester.clone() {
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(Error::NotAuthorized)
     }
 
     fn load_claim(env: &Env, claim_id: u64) -> Result<ClaimRecord, Error> {
@@ -817,7 +876,7 @@ impl MedicalClaimsSystem {
             }
         }
 
-        reviewers.push_back(reviewer);
+        reviewers.push_back(reviewer.clone());
         env.storage()
             .persistent()
             .set(&DataKey::AuthorizedReviewers, &reviewers);

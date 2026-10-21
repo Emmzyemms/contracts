@@ -490,7 +490,7 @@ fn test_reconcile_insurer_payment() {
     let result = client.try_reconcile_claim(&claim_id, &0, &true, &fr_owner, &0, &insurer);
     assert!(result.is_ok());
 
-    let payments = client.get_insurer_payments(&claim_id);
+    let payments = client.get_insurer_payments(&insurer, &claim_id);
     assert_eq!(payments.len(), 1);
     assert!(payments.get(0).unwrap().reconciled);
 }
@@ -537,7 +537,7 @@ fn test_reconcile_patient_payment() {
     let result = client.try_reconcile_claim(&claim_id, &0, &false, &fr_owner, &0, &patient);
     assert!(result.is_ok());
 
-    let payments = client.get_patient_payments(&claim_id);
+    let payments = client.get_patient_payments(&patient, &claim_id);
     assert_eq!(payments.len(), 1);
     assert!(payments.get(0).unwrap().reconciled);
 }
@@ -616,8 +616,42 @@ fn test_mark_claim_disputed() {
 
     client.mark_claim_disputed(&claim_id, &insurer);
 
-    let claim = client.get_claim(&claim_id);
+    let claim = client.get_claim(&insurer, &claim_id);
     assert_eq!(claim.reconciliation_status, ReconciliationStatus::Disputed);
+}
+
+#[test]
+fn test_claim_and_payment_getters_reject_unrelated_requester() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, provider, patient, insurer) = setup(&env);
+
+    let claim_id = client.submit_claim(
+        &provider,
+        &patient,
+        &insurer,
+        &1,
+        &1000,
+        &make_services(&env),
+        &Vec::new(&env),
+        &BytesN::from_array(&env, &[0; 32]),
+        &policy(&env),
+        &15000,
+    );
+    let unrelated = Address::generate(&env);
+
+    assert_eq!(
+        client.try_get_claim(&unrelated, &claim_id),
+        Err(Ok(Error::NotAuthorized))
+    );
+    assert_eq!(
+        client.try_get_insurer_payments(&unrelated, &claim_id),
+        Err(Ok(Error::NotAuthorized))
+    );
+    assert_eq!(
+        client.try_get_patient_payments(&unrelated, &claim_id),
+        Err(Ok(Error::NotAuthorized))
+    );
 }
 
 #[test]

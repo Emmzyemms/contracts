@@ -133,8 +133,7 @@ pub enum DataKey {
     RotationExpiry,
     /// Per-caller nonce for replay attack protection: (caller) -> u64
     CallerNonce(Address),
-    /// Addresses authorised to update `active` (e.g. the healthcare-credentialing contract).
-    TrustedAuthority(Address),
+    ProviderHospital(Address, Address),
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -341,9 +340,49 @@ impl ProviderRegistry {
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
-    fn assert_initialized(env: &Env) -> Result<(), Error> {
-        if env.storage().persistent().has(&DataKey::Initialized) {
-            Ok(())
+        env.events()
+            .publish((symbol_short!("react_pr"), provider), symbol_short!("ok"));
+        Ok(())
+    }
+
+    pub fn is_provider(env: Env, provider: Address) -> bool {
+        Self::is_provider_active(&env, &provider)
+    }
+
+    pub fn set_provider_hospital(
+        env: Env,
+        admin: Address,
+        provider: Address,
+        hospital: Address,
+        affiliated: bool,
+    ) -> Result<(), Error> {
+        Self::assert_initialized(&env)?;
+        validate_nonzero_address(&provider).map_err(|_| Error::InvalidAddress)?;
+        validate_nonzero_address(&hospital).map_err(|_| Error::InvalidAddress)?;
+        Self::assert_admin(&env, &admin)?;
+        if affiliated && !Self::is_provider_active(&env, &provider) {
+            return Err(Error::NotAProvider);
+        }
+
+        env.storage().persistent().set(
+            &DataKey::ProviderHospital(provider.clone(), hospital.clone()),
+            &affiliated,
+        );
+        Ok(())
+    }
+
+    pub fn is_provider_affiliated(env: Env, provider: Address, hospital: Address) -> bool {
+        Self::is_provider_active(&env, &provider)
+            && env
+                .storage()
+                .persistent()
+                .get(&DataKey::ProviderHospital(provider, hospital))
+                .unwrap_or(false)
+    }
+
+    fn is_provider_active(env: &Env, provider: &Address) -> bool {
+        if let Some(profile) = env.storage().persistent().get::<DataKey, ProviderProfile>(&DataKey::Provider(provider.clone())) {
+            profile.active && profile.credential.revoked_at.is_none() && profile.credential.expires_at > env.ledger().timestamp()
         } else {
             Err(Error::NotInitialized)
         }
