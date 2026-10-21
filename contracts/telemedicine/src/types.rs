@@ -29,12 +29,10 @@ pub enum Error {
     ProviderNotRegistered = 17,
     /// Caller is not a credentialed/verified provider; admin co-signature required
     ProviderNotVerified = 18,
-    /// Provider registry address has not been configured by the admin
-    ProviderRegistryNotSet = 19,
-    /// Visit must be InProgress or Completed before documentation is accepted
-    VisitNotDocumentable = 20,
-    /// Prescription not found
-    PrescriptionNotFound = 21,
+    /// Patient has not attested their location for this visit
+    PatientLocationNotConfirmed = 19,
+    /// Session start is outside the allowed window around the scheduled time
+    OutsideScheduledWindow = 20,
 }
 
 /// On-chain record of a provider's license in a given jurisdiction (state/region).
@@ -84,7 +82,11 @@ pub struct VirtualVisit {
     pub status: VisitStatus,
     pub session_start: Option<u64>,
     pub session_end: Option<u64>,
+    /// Patient-attested location. Empty until the patient confirms via
+    /// `confirm_location`; never set from provider-supplied arguments.
     pub patient_location: String,
+    /// True once the patient has attested `patient_location` on-chain.
+    pub location_confirmed: bool,
     pub consent_documented: bool,
     /// Explicit per-session recording consent (HIPAA). None = not yet decided.
     pub recording_consent: Option<bool>,
