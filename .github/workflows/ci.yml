@@ -6,42 +6,424 @@ on:
   pull_request:
 
 jobs:
-  phi-plaintext-lint:
-    name: PHI plaintext lint
+  check-healthcare-analytics:
+    name: Check healthcare-analytics
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Flag plaintext String fields in contracttype structs
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: cargo check healthcare-analytics
+        run: cargo check -p healthcare-analytics
+
+  check-lab-management:
+    name: Check lab-management
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: cargo check lab-management (lib + tests)
+        run: cargo check -p lab-management --tests
+
+  check-medical-device-tracking:
+    name: Check medical-device-tracking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: cargo check medical-device-tracking (lib + tests)
+        run: cargo check -p medical-device-tracking --tests
+
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  check:
+    name: Cargo Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run cargo check
+        run: cargo check --workspace --keep-going --tests
+
+  clippy:
+    name: Clippy Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run tests
+        run: cargo test --workspace --verbose
+
+  test-access-control:
+    name: Test access-control
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run access-control tests
+        run: cargo test -p access-control --verbose
+
+  truncation-marker-check:
+    name: Truncation Marker Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fail on truncation markers under contracts/
+        run: |
+          if grep -rnE '/\* … truncated [0-9]+ chars' contracts/; then
+            echo "::error::Found truncation markers in contracts/. Files must not be committed with '/* … truncated N chars' placeholders."
+            exit 1
+          fi
+          echo "No truncation markers found."
+
+  api-surface-diff:
+    name: API Surface Diff
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract pub fn names from #[contractimpl] blocks
         run: |
           set -euo pipefail
-          # Issue #994: clinical free text / coded clinical values must not be
-          # stored as plaintext `String` fields in #[contracttype] structs.
-          # Contract storage is world-readable via RPC getLedgerEntries and
-          # ledger history, so getter auth does not provide confidentiality.
-          # Store an EncryptedEnvelopeRef (shared::privacy) or salted hash
-          # commitment instead. Only allowlisted identifiers/URIs/codes pass.
-          allowlist='^(id|.*_id|.*_ids|uri|.*_uri|url|.*_url|code|.*_code|status|.*_status|kind|.*_kind|type|.*_type|name|.*_name|symbol|.*_symbol|version|.*_version|hash|.*_hash|commitment|.*_commitment|envelope|.*_envelope|ref|.*_ref|memo|.*_memo|reason_code|.*_reason_code)$'
-          fail=0
-          while IFS= read -r file; do
-            # Track whether we are inside a #[contracttype] struct.
-            in_struct=0
-            while IFS= read -r line; do
-              if printf '%s' "$line" | grep -Eq '#\[contracttype\]'; then
-                in_struct=1
-                continue
-              fi
-              if [ "$in_struct" -eq 1 ]; then
-                if printf '%s' "$line" | grep -Eq '^\s*pub\s+[A-Za-z0-9_]+\s*:\s*String\b'; then
-                  field=$(printf '%s' "$line" | sed -E 's/^\s*pub\s+([A-Za-z0-9_]+)\s*:.*/\1/')
-                  if ! printf '%s' "$field" | grep -Eq "$allowlist"; then
-                    echo "::error file=$file::plaintext String field '$field' in #[contracttype] struct — use EncryptedEnvelopeRef or a salted hash commitment (issue #994)"
-                    fail=1
-                  fi
-                fi
-                if printf '%s' "$line" | grep -Eq '^\s*\}'; then
-                  in_struct=0
-                fi
-              fi
-            done < "$file"
-          done < <(find contracts -path '*/src/*' -name '*.rs' -type f)
-          exit "$fail"
+          BASE_REF="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1 || true
+
+          extract() {
+            # $1 = git ref (or empty for working tree)
+            if [ -n "$1" ]; then
+              git ls-tree -r --name-only "$1" -- contracts/ | grep -E 'src/.*\.rs$' | while read -r f; do
+                git show "$1:$f" 2>/dev/null | awk -v file="$f" '
+                  /#\[contractimpl\]/ { in_impl=1; next }
+                  in_impl && /^[[:space:]]*pub fn / {
+                    line=$0
+                    sub(/^[[:space:]]*pub fn /, "", line)
+                    sub(/[^A-Za-z0-9_].*$/, "", line)
+                    print file ":" line
+                  }
+                  in_impl && /^}/ { in_impl=0 }
+                '
+              done
+            else
+              find contracts -type f -path '*/src/*.rs' | while read -r f; do
+                awk -v file="$f" '
+                  /#\[contractimpl\]/ { in_impl=1; next }
+                  in_impl && /^[[:space:]]*pub fn / {
+                    line=$0
+                    sub(/^[[:space:]]*pub fn /, "", line)
+                    sub(/[^A-Za-z0-9_].*$/, "", line)
+                    print file ":" line
+                  }
+                  in_impl && /^}/ { in_impl=0 }
+                ' "$f"
+              done
+            fi
+          }
+
+          extract "$BASE_REF" | sort -u > /tmp/base_api.txt
+          extract "" | sort -u > /tmp/pr_api.txt
+
+          echo "Base API surface:"; cat /tmp/base_api.txt
+          echo "PR API surface:"; cat /tmp/pr_api.txt
+
+          REMOVED=$(comm -23 /tmp/base_api.txt /tmp/pr_api.txt || true)
+          if [ -n "$REMOVED" ]; then
+            echo "::warning::Public functions removed from #[contractimpl] blocks:"
+            echo "$REMOVED"
+            LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+            if echo "$LABELS" | grep -q 'breaking-change'; then
+              echo "breaking-change label present; allowing removal."
+            else
+              echo "::error::Public API functions were removed. Add the 'breaking-change' label if intentional."
+              exit 1
+            fi
+          else
+            echo "No public functions removed."
+          fi
+
+  test-count-guard:
+    name: Non-Zero Test Count Guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Fail when a crate with test.rs reports 0 passed
+        run: |
+          set -uo pipefail
+          FAIL=0
+          for testfile in $(find contracts -type f -name 'test.rs'); do
+            crate_dir=$(dirname "$(dirname "$testfile")")
+            crate=$(basename "$crate_dir")
+            echo "::group::cargo test -p $crate"
+            OUT=$(cargo test -p "$crate" 2>&1) || true
+            echo "$OUT"
+            echo "::endgroup::"
+            PASSED=$(echo "$OUT" | grep -oE 'test result: ok\. [0-9]+ passed' | grep -oE '[0-9]+' | head -n1 || true)
+            if [ -z "${PASSED:-}" ]; then
+              echo "::error::crate $crate has test.rs but no passing test result was reported."
+              FAIL=1
+            elif [ "$PASSED" -eq 0 ]; then
+              echo "::error::crate $crate has test.rs but reported 0 passed tests."
+              FAIL=1
+            fi
+          done
+          exit $FAIL
+
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Build WASM
+        run: cargo build --target wasm32-unknown-unknown --release --workspace

@@ -392,8 +392,5 @@ cargo test --test integration_tests
 <!-- handsoff-issue-941 -->
 - #941: [patient-registry] Test suite does not compile — 95 errors from nonce parameters added in #776
 
-<!-- handsoff-issue-998 -->
-- #998: [zk-eligibility] "Verification" is still forgeable after #821/#893 — the tag is the first 4 bytes of sha256(public vk || public inputs)
-
-<!-- handsoff-issue-999 -->
-- #999: [patient-registry] register_institution is still self-service (regression of #890) — anyone can become an institution and verify any doctor
+<!-- handsoff-issue-983 -->
+- #983: [workspace] Storage writes followed by `return Err` are silently rolled back — remaining occurrences and a CI guard
