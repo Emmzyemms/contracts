@@ -111,6 +111,21 @@ pub struct PrescriptionRequest {
     pub is_controlled_substance: bool,
 }
 
+/// Stored prescription record. Keeps the patient and prescriber so that
+/// reads can be authorized to those parties (and authorized pharmacies).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Prescription {
+    pub rx_id: u64,
+    pub patient_id: Address,
+    pub prescriber_id: Address,
+    pub medication_name: String,
+    pub dosage: String,
+    pub frequency: String,
+    pub duration_days: u32,
+    pub is_controlled_substance: bool,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionRecord {
@@ -160,8 +175,10 @@ pub enum DataKey {
     ProviderRegistryAddress,
     /// Address of the stored admin
     Admin,
-    /// rx_id -> PrescriptionRequest
+    /// rx_id -> Prescription
     Prescription(u64),
     /// Running counter for prescription IDs
     PrescriptionCount,
+    /// pharmacy address -> bool (true = authorized to read prescriptions)
+    AuthorizedPharmacy(Address),
 }
