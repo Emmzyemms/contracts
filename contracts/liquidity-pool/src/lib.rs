@@ -34,7 +34,6 @@ const POOL_FEE_BPS: i128 = 30; // 0.30%
 #[repr(u32)]
 pub enum Error {
     NotInitialized = 1,
-    AlreadyInitialized = 2,
     ZeroAmount = 3,
     InsufficientLiquidity = 4,
     SlippageExceeded = 5,
@@ -45,9 +44,16 @@ pub enum Error {
     NoRotationPending = 10,
     RotationExpired = 11,
     NotPendingAdmin = 12,
+    IdenticalTokens = 13,
+    Paused = 14,
 }
 
 const ADMIN_ROTATION_WINDOW: u64 = 86_400;
+const INSTANCE_BUMP_AMOUNT: u32 = 518_400; // ~30 days (at 5s per ledger)
+const INSTANCE_LIFETIME_THRESHOLD: u32 = 120_960; // ~7 days
+const SHARES_BUMP_AMOUNT: u32 = 518_400;
+const SHARES_LIFETIME_THRESHOLD: u32 = 120_960;
+
 
 #[contracttype]
 pub enum DataKey {
@@ -60,6 +66,7 @@ pub enum DataKey {
     RotationExpiry,
     TokenA,
     TokenB,
+    IsPaused,
 }
 
 #[contracttype]
@@ -75,13 +82,18 @@ pub struct LiquidityPoolContract;
 
 #[contractimpl]
 impl LiquidityPoolContract {
-    pub fn initialize(
+    /// Runs atomically as part of contract creation, so the deployer binds the
+    /// admin and token addresses and no front-running `initialize` call is possible.
+    pub fn __constructor(
         env: Env,
         admin: Address,
         token_a: Address,
         token_b: Address,
     ) -> Result<(), Error> {
         admin.require_auth();
+        if token_a == token_b {
+            return Err(Error::IdenticalTokens);
+        }
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
@@ -91,6 +103,8 @@ impl LiquidityPoolContract {
         env.storage().instance().set(&DataKey::ReserveA, &0i128);
         env.storage().instance().set(&DataKey::ReserveB, &0i128);
         env.storage().instance().set(&DataKey::TotalShares, &0i128);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         Ok(())
     }
 
@@ -102,6 +116,8 @@ impl LiquidityPoolContract {
         amount_a: i128,
         amount_b: i128,
     ) -> Result<i128, Error> {
+        Self::assert_not_paused(&env)?;
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         provider.require_auth();
         if amount_a <= 0 || amount_b <= 0 {
             return Err(Error::ZeroAmount);
@@ -192,6 +208,8 @@ impl LiquidityPoolContract {
         provider: Address,
         shares: i128,
     ) -> Result<(i128, i128), Error> {
+        Self::assert_not_paused(&env)?;
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         provider.require_auth();
         if shares <= 0 {
             return Err(Error::ZeroAmount);
@@ -270,6 +288,8 @@ impl LiquidityPoolContract {
         min_out: i128,
         a_to_b: bool,
     ) -> Result<i128, Error> {
+        Self::assert_not_paused(&env)?;
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
         trader.require_auth();
         if amount_in <= 0 {
             return Err(Error::ZeroAmount);
@@ -385,6 +405,92 @@ impl LiquidityPoolContract {
             .get(&DataKey::Shares(provider))
             .unwrap_or(0)
     }
+
+    /// Propose a new admin (starts rotation window).
+    pub fn propose_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(&env)?;
+        admin.require_auth();
+        if env.storage().instance().has(&DataKey::PendingAdmin) {
+            return Err(Error::RotationPending);
+        }
+        let expiry = env.ledger().timestamp() + ADMIN_ROTATION_WINDOW;
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.storage().instance().set(&DataKey::RotationExpiry, &expiry);
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        Ok(())
+    }
+
+    /// Accept admin role by pending admin.
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        new_admin.require_auth();
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(Error::NoRotationPending)?;
+        if pending != new_admin {
+            return Err(Error::NotPendingAdmin);
+        }
+        let expiry: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RotationExpiry)
+            .ok_or(Error::NoRotationPending)?;
+        if env.ledger().timestamp() > expiry {
+            return Err(Error::RotationExpired);
+        }
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage().instance().remove(&DataKey::RotationExpiry);
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        Ok(())
+    }
+
+    /// Pause or unpause pool trading and liquidity modification.
+    pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
+        let admin = Self::get_admin(&env)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::IsPaused, &paused);
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        Ok(())
+    }
+
+    /// Reconcile internal reserves against actual token balances.
+    pub fn sync(env: Env) -> Result<PoolStats, Error> {
+        env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        let token_a: Address = env.storage().instance().get(&DataKey::TokenA).ok_or(Error::NotInitialized)?;
+        let token_b: Address = env.storage().instance().get(&DataKey::TokenB).ok_or(Error::NotInitialized)?;
+        let pool = env.current_contract_address();
+
+        let bal_a = token::Client::new(&env, &token_a).balance(&pool);
+        let bal_b = token::Client::new(&env, &token_b).balance(&pool);
+
+        env.storage().instance().set(&DataKey::ReserveA, &bal_a);
+        env.storage().instance().set(&DataKey::ReserveB, &bal_b);
+
+        let total_shares: i128 = env.storage().instance().get(&DataKey::TotalShares).unwrap_or(0);
+        Ok(PoolStats {
+            reserve_a: bal_a,
+            reserve_b: bal_b,
+            total_shares,
+        })
+    }
+
+    pub fn get_admin(env: &Env) -> Result<Address, Error> {
+        env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get(&DataKey::IsPaused).unwrap_or(false)
+    }
+
+    fn assert_not_paused(env: &Env) -> Result<(), Error> {
+        if env.storage().instance().get(&DataKey::IsPaused).unwrap_or(false) {
+            return Err(Error::Paused);
+        }
+        Ok(())
+    }
+
 }
 
 /// Integer square root (floor) for initial share supply.
@@ -400,3 +506,6 @@ fn sqrt(value: i128) -> i128 {
     }
     x
 }
+
+#[cfg(test)]
+mod test;
