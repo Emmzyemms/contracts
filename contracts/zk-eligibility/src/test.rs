@@ -101,6 +101,19 @@ fn make_invalid_proof(env: &Env) -> Bytes {
 }
 
 /// Convenience: a complete, valid ProofBundle for `(vk_tag, schema_version)`.
+
+/// Build a valid migration proof for (new_vk_bytes, old_version, new_version).
+fn migration_proof(env: &Env, new_vk_bytes: &Bytes, old_version: u32, new_version: u32) -> Bytes {
+    let mut inputs = Vec::new(env);
+    inputs.push_back(ZkEligibility::encode_u32_public_input(
+        env,
+        u32::from_be_bytes(*b"MIGR"),
+    ));
+    inputs.push_back(ZkEligibility::encode_u32_public_input(env, old_version));
+    inputs.push_back(ZkEligibility::encode_u32_public_input(env, new_version));
+    make_proof(env, new_vk_bytes, &inputs)
+}
+
 fn valid_bundle(env: &Env, vk_bytes: &Bytes, schema_version: u32) -> ProofBundle {
     let inputs = inputs_with_expiry(env, FUTURE_EXPIRY);
     let proof = make_proof(env, vk_bytes, &inputs);
@@ -410,14 +423,36 @@ fn test_multiple_schema_versions_coexist() {
 #[test]
 fn test_migrate_schema_marks_old_schema_as_migrated() {
     let (env, admin, client) = setup();
-    client.register_verifier_key(&admin, &1u32, &vk(&env, 0xAA));
-    client.register_verifier_key(&admin, &2u32, &vk(&env, 0xBB));
+    let vk1 = vk(&env, 0xAA);
+    let vk2 = vk(&env, 0xBB);
+    client.register_verifier_key(&admin, &1u32, &vk1);
+    client.register_verifier_key(&admin, &2u32, &vk2);
     client.deprecate_verifier_key(&admin, &1u32);
 
-    client.migrate_schema(&admin, &1u32, &2u32, &proof(&env, 0xBB));
+    // Valid proof matching new schema verifier key vk2
+    let proof = migration_proof(&env, &vk2, 1, 2);
+    client.migrate_schema(&admin, &1u32, &2u32, &proof);
 
     let old_entry = client.get_verifier_key(&1u32);
     assert_eq!(old_entry.migrated_to, 2);
+}
+
+#[test]
+fn test_migrate_schema_rejects_mismatched_proof() {
+    let (env, admin, client) = setup();
+    let vk1 = vk(&env, 0xAA);
+    let vk2 = vk(&env, 0xBB);
+    client.register_verifier_key(&admin, &1u32, &vk1);
+    client.register_verifier_key(&admin, &2u32, &vk2);
+    client.deprecate_verifier_key(&admin, &1u32);
+
+    // Proof generated with wrong key vk1 instead of vk2
+    let invalid_proof = migration_proof(&env, &vk1, 1, 2);
+    let err = client
+        .try_migrate_schema(&admin, &1u32, &2u32, &invalid_proof)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::VerificationFailed);
 }
 
 // ── admin rotation ────────────────────────────────────────────────────────────

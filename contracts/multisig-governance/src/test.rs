@@ -40,7 +40,54 @@ fn payload(env: &Env) -> Bytes {
     Bytes::from_slice(env, b"export_all_records")
 }
 
-// ── constructor ───────────────────────────────────────────────────────────────
+// ── initialize ────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_double_initialize_returns_error() {
+    let (_env, signers, client) = setup(3, 2);
+    let err = client
+        .try_initialize(&signers, &2u32, &3600u64, &2u32)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::AlreadyInitialized);
+}
+
+#[test]
+fn test_front_run_initialize_prevented() {
+    // With mock_all_auths, any address can authenticate, so the legitimate
+    // deployer's initialize succeeds and locks out subsequent attempts.
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(MultisigGovernance, ());
+    let client = MultisigGovernanceClient::new(&env, &contract_id);
+
+    let deployer = Address::generate(&env);
+
+    // Legitimate deployer initializes with their own signer set
+    let mut real_signers = Vec::new(&env);
+    real_signers.push_back(deployer.clone());
+    client.initialize(&real_signers, &1u32, &3600u64, &1u32);
+
+    // An attacker (with different signers) tries to re-initialize — should fail
+    let attacker = Address::generate(&env);
+    let mut attacker_signers = Vec::new(&env);
+    attacker_signers.push_back(attacker.clone());
+    let err = client
+        .try_initialize(&attacker_signers, &1u32, &3600u64, &1u32)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, Error::AlreadyInitialized);
+
+    // Verify that the deployer's signer set is intact, not the attacker's
+    let stored_signers: Vec<Address> = env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Signers)
+            .unwrap()
+    });
+    assert_eq!(stored_signers.len(), 1);
+    assert_eq!(stored_signers.get(0).unwrap(), deployer);
+}
 
 #[test]
 #[should_panic]
@@ -135,26 +182,29 @@ fn test_at_threshold_with_quorum_executes() {
 // ── quorum not met ────────────────────────────────────────────────────────────
 
 #[test]
-fn test_threshold_met_but_quorum_not_met_returns_error() {
+fn test_threshold_met_but_quorum_not_met_keeps_approval_and_proposal_pending() {
     // 3 signers, threshold=1, quorum_min=3.
-    // Proposer's single vote meets threshold but not quorum.
-    // A second approver triggers try_finalize which returns QuorumNotMet.
+    // Proposer's single vote meets threshold (1) but not quorum (3).
+    // A second approver approves: approval is successfully recorded and persisted,
+    // but the proposal remains Pending because quorum_min is not yet reached.
     let (env, signers, client) = setup_with_quorum(3, 1, 3);
     let s0 = signers.get(0).unwrap();
     let s1 = signers.get(1).unwrap();
     client.propose_multisig_action(&s0, &symbol_short!("export"), &payload(&env));
-    // s0 already has 1 approval (threshold=1 met), but quorum_min=3 not met.
-    // Approving with s1 triggers finalization → QuorumNotMet.
-    let err = client
-        .try_approve_multisig_action(&s1, &symbol_short!("export"))
-        .unwrap_err()
-        .unwrap();
-    assert_eq!(err, Error::QuorumNotMet);
 
-    // The QuorumNotMet error must not erase s1's already-cast approval.
+    // s1 approves: should succeed with Ok(()), keeping proposal Pending.
+    client.approve_multisig_action(&s1, &symbol_short!("export"));
+
     let proposal = client.get_proposal(&symbol_short!("export"));
     assert!(proposal.approvals.contains(&s1));
     assert_eq!(proposal.approvals.len(), 2);
+    assert_eq!(proposal.status, ProposalStatus::Pending);
+
+    // s2 approves: reaches quorum_min=3 and executes.
+    let s2 = signers.get(2).unwrap();
+    client.approve_multisig_action(&s2, &symbol_short!("export"));
+    let finalized = client.get_proposal(&symbol_short!("export"));
+    assert_eq!(finalized.status, ProposalStatus::Executed);
 }
 
 // ── abstention ────────────────────────────────────────────────────────────────
