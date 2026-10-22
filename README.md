@@ -118,10 +118,12 @@ git clone git@github.com:Healthy-Stellar/contracts.git
 cd contracts
 ```
 
-2. Install dependencies:
+2. Build and install the Rust dependencies with Cargo. This repository has no npm package:
 ```bash
-cargo build
+cargo build --locked
 ```
+
+Keep `Cargo.lock` committed so builds use the same dependency versions.
 
 3. Configure your environment:
 ```bash
@@ -349,6 +351,8 @@ soroban contract invoke \
 ```
 
 ## Testing
+
+Soroban writes generated snapshots under `test_snapshots/` during tests. These are local debugging artifacts, not golden files: keep them ignored and do not commit them. The `target/` and `target-pacs-test/` build directories are also ignored.
 
 Run the complete test suite:
 
