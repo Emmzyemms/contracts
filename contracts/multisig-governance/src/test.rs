@@ -27,10 +27,12 @@ fn setup_with_quorum(
 ) -> (Env, Vec<Address>, MultisigGovernanceClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(MultisigGovernance, ());
-    let client = MultisigGovernanceClient::new(&env, &contract_id);
     let signers = make_signers(&env, n);
-    client.initialize(&signers, &threshold, &3600u64, &quorum_min);
+    let contract_id = env.register(
+        MultisigGovernance,
+        (&signers, &threshold, &3600u64, &quorum_min),
+    );
+    let client = MultisigGovernanceClient::new(&env, &contract_id);
     (env, signers, client)
 }
 
@@ -88,31 +90,17 @@ fn test_front_run_initialize_prevented() {
 }
 
 #[test]
-fn test_invalid_threshold_returns_error() {
+#[should_panic]
+fn test_invalid_threshold_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(MultisigGovernance, ());
-    let client = MultisigGovernanceClient::new(&env, &contract_id);
     let signers = make_signers(&env, 2);
-    let err = client
-        .try_initialize(&signers, &3u32, &3600u64, &2u32)
-        .unwrap_err()
-        .unwrap();
-    assert_eq!(err, Error::InvalidThreshold);
-}
 
-#[test]
-fn test_propose_before_init_returns_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let contract_id = env.register(MultisigGovernance, ());
-    let client = MultisigGovernanceClient::new(&env, &contract_id);
-    let signer = Address::generate(&env);
-    let err = client
-        .try_propose_multisig_action(&signer, &symbol_short!("export"), &payload(&env))
-        .unwrap_err()
-        .unwrap();
-    assert_eq!(err, Error::NotInitialized);
+    // threshold (3) exceeds the number of signers, so the constructor rejects it.
+    env.register(
+        MultisigGovernance,
+        (&signers, &3u32, &3600u64, &2u32),
+    );
 }
 
 // ── propose ───────────────────────────────────────────────────────────────────

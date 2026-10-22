@@ -34,7 +34,6 @@ const POOL_FEE_BPS: i128 = 30; // 0.30%
 #[repr(u32)]
 pub enum Error {
     NotInitialized = 1,
-    AlreadyInitialized = 2,
     ZeroAmount = 3,
     InsufficientLiquidity = 4,
     SlippageExceeded = 5,
@@ -83,7 +82,9 @@ pub struct LiquidityPoolContract;
 
 #[contractimpl]
 impl LiquidityPoolContract {
-    pub fn initialize(
+    /// Runs atomically as part of contract creation, so the deployer binds the
+    /// admin and token addresses and no front-running `initialize` call is possible.
+    pub fn __constructor(
         env: Env,
         admin: Address,
         token_a: Address,
